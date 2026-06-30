@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: sphere-agent
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      - key: SPHERE_NETWORK
+        value: testnet
+      - key: SPHERE_ORACLE_API_KEY
+        sync: false
+      - key: WALLET_MNEMONIC
+        sync: false
+      - key: AGENT_NAMETAG
+        sync: false
+      - key: MAX_SPEND_PER_DAY
+        value: "1000000"
+      - key: MAX_SPEND_COIN
+        value: UCT
+      - key: MAX_SPEND_PER_DEAL
+        value: "200000"
+      - key: TRADE_COIN
+        value: UCT
+      - key: TRADE_TARGET_PRICE_USD
+        sync: false
+      - key: TRADE_SIDE
+        value: buy
+      - key: PORT
+        value: "10000"
+    healthCheckPath: /api/status
