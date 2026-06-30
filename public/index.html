@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sphere Agent Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:#0e0f12; color:#e7e7ea; margin:0; padding:24px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { color:#8a8a92; font-size:13px; margin-bottom:24px; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:20px; }
+  @media (max-width:900px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:#16171c; border:1px solid #25262d; border-radius:10px; padding:16px; }
+  .card h2 { font-size:14px; margin:0 0 12px; color:#c9c9d1; text-transform:uppercase; letter-spacing:.04em; }
+  .row { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid #1f2026; font-size:13px; }
+  .row:last-child { border-bottom:none; }
+  .deal { border:1px solid #25262d; border-radius:8px; padding:10px; margin-bottom:10px; font-size:13px; }
+  .deal .meta { color:#8a8a92; font-size:11px; margin-top:4px; }
+  .btns { margin-top:8px; display:flex; gap:8px; }
+  button { background:#2a6df0; color:white; border:none; border-radius:6px; padding:6px 12px; font-size:12px; cursor:pointer; }
+  button.reject { background:#3a3b42; }
+  button:disabled { opacity:.4; cursor:default; }
+  .status-pending { color:#e0b341; }
+  .status-executed { color:#4cd17a; }
+  .status-rejected, .status-failed { color:#e05b5b; }
+  .status-approved { color:#7aa6f7; }
+  .log-line { font-size:12px; padding:3px 0; border-bottom:1px solid #1a1b20; font-family:ui-monospace, monospace; }
+  .log-warn { color:#e0b341; }
+  .log-error { color:#e05b5b; }
+  .empty { color:#666; font-size:13px; padding:8px 0; }
+  input { background:#0e0f12; border:1px solid #2a2b32; color:#e7e7ea; padding:6px 8px; border-radius:6px; font-size:12px; width:100%; box-sizing:border-box; margin-bottom:6px; }
+</style>
+</head>
+<body>
+  <h1>Sphere Agent Dashboard</h1>
+  <div class="sub" id="identityLine">Loading agent identity…</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Wallet</h2>
+      <div id="assets" class="empty">Loading…</div>
+      <h2 style="margin-top:16px">Spending caps</h2>
+      <div id="caps" class="empty">Loading…</div>
+    </div>
+
+    <div class="card">
+      <h2>Post a new offer to the market</h2>
+      <input id="poCoin" placeholder="coinId (e.g. UCT)" />
+      <input id="poAmount" placeholder="amount (smallest unit)" />
+      <input id="poPrice" placeholder="ask price USD" />
+      <input id="poDesc" placeholder="description" />
+      <button onclick="postOffer()">Post offer</button>
+      <div id="poResult" class="sub" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:20px">
+    <div class="card">
+      <h2>Pending approval — nothing sends without your click</h2>
+      <div id="deals" class="empty">Loading…</div>
+    </div>
+
+    <div class="card">
+      <h2>Activity log</h2>
+      <div id="log" class="empty">Loading…</div>
+    </div>
+  </div>
+
+<script>
+async function fetchJSON(url, opts) {
+  const r = await fetch(url, opts);
+  return r.json();
+}
+
+async function refreshStatus() {
+  const s = await fetchJSON('/api/status');
+  document.getElementById('identityLine').textContent =
+    (s.nametag ? '@' + s.nametag + ' — ' : '') + (s.address ?? 'no address') + '  ·  network: ' + s.network;
+
+  const assetsEl = document.getElementById('assets');
+  if (!s.assets || !s.assets.length) {
+    assetsEl.innerHTML = '<div class="empty">No assets yet</div>';
+  } else {
+    assetsEl.innerHTML = s.assets.map(a =>
+      '<div class="row"><span>' + (a.symbol ?? a.coinId) + '</span><span>' + a.totalAmount +
+      (a.fiatValueUsd != null ? ' ($' + a.fiatValueUsd.toFixed(2) + ')' : '') + '</span></div>'
+    ).join('');
+  }
+
+  document.getElementById('caps').innerHTML =
+    '<div class="row"><span>Max per deal</span><span>' + s.caps.maxPerDeal + ' ' + s.caps.coin + '</span></div>' +
+    '<div class="row"><span>Max per 24h</span><span>' + s.caps.maxPerDay + ' ' + s.caps.coin + '</span></div>';
+}
+
+async function refreshDeals() {
+  const deals = await fetchJSON('/api/deals');
+  const el = document.getElementById('deals');
+  if (!deals.length) { el.innerHTML = '<div class="empty">No proposed deals yet</div>'; return; }
+  el.innerHTML = deals.map(d => {
+    const pendingBtns = d.status === 'pending'
+      ? '<div class="btns"><button onclick="act(\'' + d.id + '\',\'approve\')">Approve & send</button>' +
+        '<button class="reject" onclick="act(\'' + d.id + '\',\'reject\')">Reject</button></div>'
+      : '';
+    return '<div class="deal"><div>' + d.summary + '</div>' +
+      '<div class="meta status-' + d.status + '">' + d.status.toUpperCase() +
+      (d.resultDetail ? ' — ' + d.resultDetail : '') + '</div>' + pendingBtns + '</div>';
+  }).join('');
+}
+
+async function refreshLog() {
+  const events = await fetchJSON('/api/log');
+  const el = document.getElementById('log');
+  if (!events.length) { el.innerHTML = '<div class="empty">No activity yet</div>'; return; }
+  el.innerHTML = events.map(e =>
+    '<div class="log-line log-' + e.level + '">' + new Date(e.timestamp).toLocaleTimeString() + '  ' + e.message + '</div>'
+  ).join('');
+}
+
+async function act(id, action) {
+  await fetchJSON('/api/deals/' + id + '/' + action, { method: 'POST' });
+  refreshDeals(); refreshStatus(); refreshLog();
+}
+
+async function postOffer() {
+  const body = {
+    coinId: document.getElementById('poCoin').value,
+    amount: document.getElementById('poAmount').value,
+    askPriceUsd: parseFloat(document.getElementById('poPrice').value),
+    description: document.getElementById('poDesc').value,
+  };
+  const r = await fetchJSON('/api/post-offer', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  document.getElementById('poResult').textContent = r.ok ? 'Offer posted.' : (r.error || 'Failed');
+  refreshLog();
+}
+
+function tick() { refreshStatus(); refreshDeals(); refreshLog(); }
+tick();
+setInterval(tick, 4000);
+</script>
+</body>
+</html>
